@@ -1,27 +1,49 @@
+import { db } from '../db';
+import { agreementRequestsTable } from '../db/schema';
 import { type LegalReviewInput, type AgreementRequest } from '../schema';
+import { eq } from 'drizzle-orm';
 
 export const legalReview = async (input: LegalReviewInput): Promise<AgreementRequest> => {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is to process legal review of an agreement request.
-    // If approved, status changes to APPROVED_BY_LEGAL, if declined, status changes to DECLINED_BY_LEGAL.
-    // The handler should also record review notes and timestamp.
-    return Promise.resolve({
-        id: input.agreement_request_id,
-        vendor_name: 'Placeholder',
-        service_value: 0,
-        start_date: new Date(),
-        end_date: new Date(),
-        work_timeline_attachment: 'placeholder',
-        status: input.approved ? 'APPROVED_BY_LEGAL' : 'DECLINED_BY_LEGAL',
-        submitted_by: 'PIC_PROCUREMENT',
-        submitted_at: new Date(),
-        legal_review_notes: input.notes || null,
-        legal_reviewed_at: new Date(),
-        draft_agreement_attachment: null,
-        draft_uploaded_at: null,
-        signed_agreement_attachment: null,
-        signed_uploaded_at: null,
-        created_at: new Date(),
-        updated_at: new Date()
-    } as AgreementRequest);
+  try {
+    // First check if the agreement request exists and is in SUBMITTED status
+    const existingRequest = await db.select()
+      .from(agreementRequestsTable)
+      .where(eq(agreementRequestsTable.id, input.agreement_request_id))
+      .execute();
+
+    if (existingRequest.length === 0) {
+      throw new Error(`Agreement request with id ${input.agreement_request_id} not found`);
+    }
+
+    const currentRequest = existingRequest[0];
+    
+    if (currentRequest.status !== 'SUBMITTED') {
+      throw new Error(`Agreement request ${input.agreement_request_id} is not in SUBMITTED status. Current status: ${currentRequest.status}`);
+    }
+
+    // Update the agreement request with legal review decision
+    const newStatus = input.approved ? 'APPROVED_BY_LEGAL' : 'DECLINED_BY_LEGAL';
+    const reviewTimestamp = new Date();
+
+    const result = await db.update(agreementRequestsTable)
+      .set({
+        status: newStatus,
+        legal_review_notes: input.notes ?? null,
+        legal_reviewed_at: reviewTimestamp,
+        updated_at: reviewTimestamp
+      })
+      .where(eq(agreementRequestsTable.id, input.agreement_request_id))
+      .returning()
+      .execute();
+
+    // Convert numeric fields back to numbers before returning
+    const updatedRequest = result[0];
+    return {
+      ...updatedRequest,
+      service_value: parseFloat(updatedRequest.service_value) // Convert numeric back to number
+    };
+  } catch (error) {
+    console.error('Legal review failed:', error);
+    throw error;
+  }
 };
